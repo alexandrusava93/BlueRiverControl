@@ -2,9 +2,5 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="app_name">Blue River Control</string>
-    <string name="accessibility_description">
-        Permite aplicatiei Blue River Control sa identifice
-        elementele de pe ecran pentru automatizarea
-        aplicatiei eTollRo.
-    </string>
+    <string name="accessibility_description">Permite aplicatiei Blue River Control sa identifice elementele de pe ecran pentru automatizarea aplicatiei eTollRo.</string>
 </resources>
