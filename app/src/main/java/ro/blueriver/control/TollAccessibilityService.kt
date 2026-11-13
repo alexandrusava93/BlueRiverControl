@@ -23,8 +23,8 @@ class TollAccessibilityService : AccessibilityService() {
     companion object {
         private const val TAG = "BlueRiverControl"
         private const val ETOLL_PACKAGE = "ro.cnair.tollro"
-        private const val STEP_TIMEOUT_MS = 25_000L
-        private const val TOTAL_TIMEOUT_MS = 150_000L
+        private const val STEP_TIMEOUT_MS = 35_000L
+        private const val TOTAL_TIMEOUT_MS = 240_000L
 
         @Volatile
         private var instance: TollAccessibilityService? = null
@@ -69,7 +69,7 @@ class TollAccessibilityService : AccessibilityService() {
             if (now - startedAt > TOTAL_TIMEOUT_MS) {
                 finish(
                     if (steps.isEmpty()) "Nu sunt pasi configurati"
-                    else "Timp expirat la pasul " + (index + 1) + " (" + steps[index].text + ")"
+                    else "Timp expirat la pasul " + (index + 1) + " (" + steps[index].text + "). Pe ecran: " + screenSummary()
                 )
                 return
             }
