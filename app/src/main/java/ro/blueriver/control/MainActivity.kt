@@ -23,6 +23,7 @@ class MainActivity : Activity() {
     private lateinit var tokenInput: EditText
     private lateinit var commandsButton: Button
     private lateinit var overlayButton: Button
+    private lateinit var accessibilityButton: Button
 
     private val handler = Handler(Looper.getMainLooper())
 
@@ -104,6 +105,17 @@ class MainActivity : Activity() {
             }
         }
 
+        accessibilityButton = Button(this).apply {
+            setOnClickListener {
+                startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))
+                Toast.makeText(
+                    this@MainActivity,
+                    "Alege Blue River Control si activeaza serviciul.",
+                    Toast.LENGTH_LONG
+                ).show()
+            }
+        }
+
         val tollButton = Button(this).apply {
             text = "DESCHIDE eTollRO"
             setOnClickListener {
@@ -135,6 +147,7 @@ class MainActivity : Activity() {
         layout.addView(saveButton)
         layout.addView(commandsButton)
         layout.addView(overlayButton)
+        layout.addView(accessibilityButton)
         layout.addView(tollButton)
 
         setContentView(layout)
@@ -180,5 +193,7 @@ class MainActivity : Activity() {
             if (CommandService.isRunning) "OPRESTE COMENZILE" else "PORNESTE COMENZILE"
         overlayButton.text =
             if (Settings.canDrawOverlays(this)) "PORNIRE APLICATII: PERMIS" else "PERMITE PORNIREA APLICATIILOR"
+        accessibilityButton.text =
+            if (TollAccessibilityService.isEnabled(this)) "AUTOMATIZARE: ACTIVA" else "ACTIVEAZA AUTOMATIZAREA"
     }
 }
