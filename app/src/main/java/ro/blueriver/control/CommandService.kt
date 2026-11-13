@@ -6,6 +6,7 @@ import android.app.NotificationManager
 import android.app.PendingIntent
 import android.app.Service
 import android.content.Intent
+import android.os.PowerManager
 import android.os.IBinder
 import android.provider.Settings
 import android.util.Log
@@ -33,9 +34,11 @@ class CommandService : Service() {
         private const val RETRY_INTERVAL_MS = 30_000L
         private const val ETOLL_PACKAGE = "ro.cnair.tollro"
         private const val ETOLL_OPEN_WAIT_MS = 6_000L
+        private const val WAKE_WAIT_MS = 2_000L
 
         const val PREFS = "blue_river_control"
         const val KEY_TOKEN = "token"
+        const val KEY_WAKE_SCREEN = "wake_screen"
 
         @Volatile
         var isRunning = false
@@ -200,6 +203,11 @@ class CommandService : Service() {
             return "error" to "Nu sunt pasi configurati pentru sesiunea live"
         }
 
+        // Aprindem ecranul si ridicam blocarea inainte de automatizare:
+        // cu ecranul stins, pasii nu se pot apasa si sesiunea nu porneste.
+        wakeScreen()
+        sleep(WAKE_WAIT_MS)
+
         val launchIntent = packageManager.getLaunchIntentForPackage(ETOLL_PACKAGE)
             ?: return "error" to "eTollRo nu este instalata"
 
@@ -231,6 +239,32 @@ class CommandService : Service() {
         val ok = TollAccessibilityService.finished && message.startsWith("Sesiune")
 
         return (if (ok) "done" else "error") to message
+    }
+
+    // Aprinde ecranul si ridica blocarea telefonului (setare din ecranul aplicatiei).
+    @Suppress("DEPRECATION")
+    private fun wakeScreen() {
+        if (!getSharedPreferences(PREFS, MODE_PRIVATE).getBoolean(KEY_WAKE_SCREEN, true)) return
+
+        try {
+            getSystemService(PowerManager::class.java).newWakeLock(
+                PowerManager.SCREEN_BRIGHT_WAKE_LOCK or
+                    PowerManager.ACQUIRE_CAUSES_WAKEUP or
+                    PowerManager.ON_AFTER_RELEASE,
+                "BlueRiverControl:ecran"
+            ).acquire(90_000L)
+        } catch (e: Exception) {
+            Log.w(TAG, "Ecranul nu a pornit: " + e.message)
+        }
+
+        try {
+            startActivity(
+                Intent(this, WakeActivity::class.java)
+                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP)
+            )
+        } catch (e: Exception) {
+            Log.w(TAG, "Fereastra de trezire nu a pornit: " + e.message)
+        }
     }
 
     private fun acknowledge(token: String, id: String, status: String, message: String) {
