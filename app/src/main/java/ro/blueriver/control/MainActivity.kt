@@ -1,4 +1,3 @@
-
 package ro.blueriver.control
 
 import android.app.Activity
@@ -28,25 +27,44 @@ class MainActivity : Activity() {
         }
 
         val status = TextView(this).apply {
-            text = "Samsung Galaxy A16\nAndroid 15\n\nVersiune test 1.0"
+            text = "Samsung Galaxy A16\nAndroid 15\n\nVersiune test 1.1"
             textSize = 17f
             gravity = Gravity.CENTER
         }
 
         val accessibilityButton = Button(this).apply {
             text = "ACTIVEAZA ACCESSIBILITY"
-            setOnClickListener {
-                startActivity(
-                    Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)
-                )
-            }
+            isEnabled = false
         }
 
         val testButton = Button(this).apply {
             text = "TEST AUTOMATIZARE"
             setOnClickListener {
                 status.text =
-                    "Test disponibil dupa configurarea serviciului Accessibility."
+                    "Automatizarea va fi configurata ulterior."
+            }
+        }
+
+        val tollButton = Button(this).apply {
+            text = "DESCHIDE eTollRO"
+
+            setOnClickListener {
+                val packageName = "ro.cnair.tollro"
+
+                val launchIntent =
+                    packageManager.getLaunchIntentForPackage(packageName)
+
+                if (launchIntent != null) {
+                    try {
+                        startActivity(launchIntent)
+                        status.text = "Comanda de deschidere eTollRO trimisa."
+                    } catch (e: Exception) {
+                        status.text = "Eroare la deschiderea eTollRO: ${e.message}"
+                    }
+                } else {
+                    status.text =
+                        "eTollRO nu a fost gasita. Verifica instalarea."
+                }
             }
         }
 
@@ -54,6 +72,7 @@ class MainActivity : Activity() {
         layout.addView(status)
         layout.addView(accessibilityButton)
         layout.addView(testButton)
+        layout.addView(tollButton)
 
         setContentView(layout)
     }
