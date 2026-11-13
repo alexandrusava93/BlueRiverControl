@@ -10,6 +10,17 @@ import android.os.Handler
 import android.os.Looper
 import android.provider.Settings
 import android.util.Log
+import android.content.res.ColorStateList
+import android.graphics.Color
+import android.graphics.PixelFormat
+import android.graphics.drawable.GradientDrawable
+import android.view.Gravity
+import android.view.View
+import android.view.WindowManager
+import android.widget.FrameLayout
+import android.widget.LinearLayout
+import android.widget.ProgressBar
+import android.widget.TextView
 import android.view.accessibility.AccessibilityEvent
 import android.view.accessibility.AccessibilityNodeInfo
 
@@ -53,6 +64,15 @@ class TollAccessibilityService : AccessibilityService() {
             val service = instance ?: return false
             return service.startRun(steps)
         }
+
+        // Fereastra cu mesaj care blocheaza atingerile cat timp ruleaza pasii
+        fun showBusy(text: String) {
+            instance?.showBusyOverlay(text)
+        }
+
+        fun hideBusy() {
+            instance?.hideBusyOverlay()
+        }
     }
 
     private val handler = Handler(Looper.getMainLooper())
@@ -89,6 +109,11 @@ class TollAccessibilityService : AccessibilityService() {
             }
 
             val step = steps[index]
+
+            if (shownStep != index) {
+                shownStep = index
+                updateBusyStep(index)
+            }
 
             if (!clicked) {
                 // cat timp eTollRo nu este pe ecran, asteptam fara sa consumam timpul pasului
@@ -142,6 +167,7 @@ class TollAccessibilityService : AccessibilityService() {
         resultMessage = null
         running = true
 
+        showBusyOverlay()
         handler.post(tick)
         return true
     }
@@ -151,6 +177,7 @@ class TollAccessibilityService : AccessibilityService() {
         finished = true
         resultMessage = message
         handler.removeCallbacks(tick)
+        hideBusyOverlay()
         Log.d(TAG, "Automatizare: " + message)
     }
 
@@ -309,6 +336,126 @@ class TollAccessibilityService : AccessibilityService() {
         val gesture = GestureDescription.Builder()
             .addStroke(GestureDescription.StrokeDescription(path, 0, 50))
             .build()
-        return dispatchGesture(gesture, null, null)
+        // Apasarea injectata trebuie sa treaca peste fereastra care blocheaza ecranul
+        passTouchesThroughOverlay(true)
+        val sent = dispatchGesture(gesture, null, null)
+        handler.postDelayed({ passTouchesThroughOverlay(false) }, 500)
+        return sent
+    }
+
+    // ---------- Mesajul afisat peste ecran cat timp se lucreaza ----------
+
+    private var overlayView: View? = null
+    private var overlayParams: WindowManager.LayoutParams? = null
+    private var overlayTitle: TextView? = null
+    private var overlayStep: TextView? = null
+    private var shownStep = -1
+
+    private fun dp(value: Int): Int = (value * resources.displayMetrics.density).toInt()
+
+    private fun windowManager(): WindowManager = getSystemService(WINDOW_SERVICE) as WindowManager
+
+    private fun showBusyOverlay(title: String = "Se pornește sesiunea live…") {
+        handler.post {
+            try {
+                if (overlayView != null) {
+                    overlayTitle?.text = title
+                    return@post
+                }
+
+                val card = LinearLayout(this).apply {
+                    orientation = LinearLayout.VERTICAL
+                    gravity = Gravity.CENTER
+                    setPadding(dp(30), dp(26), dp(30), dp(26))
+                    background = GradientDrawable().apply {
+                        cornerRadius = dp(20).toFloat()
+                        setColor(Color.parseColor("#14213D"))
+                    }
+                }
+
+                card.addView(ProgressBar(this).apply {
+                    indeterminateTintList = ColorStateList.valueOf(Color.WHITE)
+                }, LinearLayout.LayoutParams(dp(42), dp(42)).apply {
+                    gravity = Gravity.CENTER_HORIZONTAL
+                    bottomMargin = dp(16)
+                })
+
+                overlayTitle = TextView(this).apply {
+                    text = title
+                    setTextColor(Color.WHITE)
+                    textSize = 18f
+                    gravity = Gravity.CENTER
+                }
+                card.addView(overlayTitle)
+
+                overlayStep = TextView(this).apply {
+                    text = "Nu atinge ecranul — pașii rulează automat."
+                    setTextColor(Color.parseColor("#C7D2E4"))
+                    textSize = 13f
+                    gravity = Gravity.CENTER
+                    setPadding(0, dp(10), 0, 0)
+                }
+                card.addView(overlayStep)
+
+                val root = FrameLayout(this).apply {
+                    setBackgroundColor(Color.parseColor("#E0000000"))
+                    isClickable = true
+                    // Atingerile sunt inghitite de fereastra, deci nimeni nu poate apasa altceva
+                    setOnTouchListener { _, _ -> true }
+                    addView(card)
+                }
+
+                val params = WindowManager.LayoutParams(
+                    WindowManager.LayoutParams.MATCH_PARENT,
+                    WindowManager.LayoutParams.MATCH_PARENT,
+                    WindowManager.LayoutParams.TYPE_ACCESSIBILITY_OVERLAY,
+                    WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
+                        WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN,
+                    PixelFormat.TRANSLUCENT
+                )
+
+                windowManager().addView(root, params)
+                overlayView = root
+                overlayParams = params
+                shownStep = -1
+            } catch (e: Exception) {
+                Log.w(TAG, "Mesajul de pe ecran nu a pornit: " + (e.message ?: ""))
+            }
+        }
+    }
+
+    private fun hideBusyOverlay() {
+        handler.post {
+            val view = overlayView ?: return@post
+            try {
+                windowManager().removeView(view)
+            } catch (e: Exception) {
+                Log.w(TAG, "Mesajul de pe ecran nu s-a inchis: " + (e.message ?: ""))
+            }
+            overlayView = null
+            overlayParams = null
+            overlayTitle = null
+            overlayStep = null
+            shownStep = -1
+        }
+    }
+
+    private fun updateBusyStep(current: Int) {
+        val total = steps.size
+        if (total == 0) return
+        overlayStep?.text = "Pasul " + (current + 1).coerceAtMost(total) + " din " + total +
+            " — nu atinge ecranul."
+    }
+
+    private fun passTouchesThroughOverlay(pass: Boolean) {
+        val view = overlayView ?: return
+        val params = overlayParams ?: return
+        val flag = WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE
+        params.flags = if (pass) params.flags or flag else params.flags and flag.inv()
+        try {
+            windowManager().updateViewLayout(view, params)
+        } catch (e: Exception) {
+            Log.w(TAG, "Mesajul de pe ecran nu s-a actualizat: " + (e.message ?: ""))
+        }
     }
 }

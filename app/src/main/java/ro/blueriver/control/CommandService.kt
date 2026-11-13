@@ -150,7 +150,11 @@ class CommandService : Service() {
 
                 "start_live" -> {
                     lastStatus = "Comanda primita: pornesc sesiunea live."
-                    val outcome = startLive(command.optJSONArray("steps"))
+                    val outcome = try {
+                        startLive(command.optJSONArray("steps"))
+                    } finally {
+                        TollAccessibilityService.hideBusy()
+                    }
                     acknowledge(token, id, outcome.first, outcome.second)
                     lastStatus = "Rezultat: " + outcome.second
                 }
@@ -207,6 +211,9 @@ class CommandService : Service() {
         // cu ecranul stins, pasii nu se pot apasa si sesiunea nu porneste.
         wakeScreen()
         sleep(WAKE_WAIT_MS)
+
+        // Cat timp ruleaza pasii, pe ecran apare un mesaj si nu se poate apasa nimic
+        TollAccessibilityService.showBusy("Se pornește sesiunea live…")
 
         val launchIntent = packageManager.getLaunchIntentForPackage(ETOLL_PACKAGE)
             ?: return "error" to "eTollRo nu este instalata"
