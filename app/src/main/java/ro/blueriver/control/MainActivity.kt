@@ -24,6 +24,7 @@ class MainActivity : Activity() {
     private lateinit var commandsButton: Button
     private lateinit var overlayButton: Button
     private lateinit var accessibilityButton: Button
+    private lateinit var wakeButton: Button
 
     private val handler = Handler(Looper.getMainLooper())
 
@@ -116,6 +117,20 @@ class MainActivity : Activity() {
             }
         }
 
+        wakeButton = Button(this).apply {
+            setOnClickListener {
+                val prefs = getSharedPreferences(CommandService.PREFS, MODE_PRIVATE)
+                val next = !prefs.getBoolean(CommandService.KEY_WAKE_SCREEN, true)
+                prefs.edit().putBoolean(CommandService.KEY_WAKE_SCREEN, next).apply()
+                refreshLabels()
+                Toast.makeText(
+                    this@MainActivity,
+                    if (next) "Ecranul va porni automat la comanda LIVE" else "Ecranul nu va porni automat",
+                    Toast.LENGTH_SHORT
+                ).show()
+            }
+        }
+
         val tollButton = Button(this).apply {
             text = "DESCHIDE eTollRO"
             setOnClickListener {
@@ -148,6 +163,7 @@ class MainActivity : Activity() {
         layout.addView(commandsButton)
         layout.addView(overlayButton)
         layout.addView(accessibilityButton)
+        layout.addView(wakeButton)
         layout.addView(tollButton)
 
         setContentView(layout)
@@ -195,5 +211,9 @@ class MainActivity : Activity() {
             if (Settings.canDrawOverlays(this)) "PORNIRE APLICATII: PERMIS" else "PERMITE PORNIREA APLICATIILOR"
         accessibilityButton.text =
             if (TollAccessibilityService.isEnabled(this)) "AUTOMATIZARE: ACTIVA" else "ACTIVEAZA AUTOMATIZAREA"
+        wakeButton.text =
+            if (getSharedPreferences(CommandService.PREFS, MODE_PRIVATE)
+                    .getBoolean(CommandService.KEY_WAKE_SCREEN, true)
+            ) "PORNESTE ECRANUL: ACTIV" else "PORNESTE ECRANUL: OPRIT"
     }
 }
