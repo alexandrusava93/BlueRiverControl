@@ -203,7 +203,9 @@ class CommandService : Service() {
         val launchIntent = packageManager.getLaunchIntentForPackage(ETOLL_PACKAGE)
             ?: return "error" to "eTollRo nu este instalata"
 
-        launchIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        // Pornim eTollRo de la primul ei ecran, chiar daca aplicatia era deja deschisa
+        // pe alta pagina - altfel pasii de automatizare nu se regasesc pe ecran.
+        launchIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK)
 
         try {
             startActivity(launchIntent)
