@@ -237,7 +237,7 @@ class CommandService : Service() {
                 POLL_URL + "?token=" + encode(token) +
                     "&action=ack&id=" + encode(id) +
                     "&status=" + encode(status) +
-                    "&result=" + encode(message.take(200))
+                    "&result=" + encode(message.take(280))
             )
         } catch (e: Exception) {
             Log.w(TAG, "Confirmarea nu a plecat: " + e.message)
