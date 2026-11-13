@@ -17,7 +17,8 @@ import java.net.URLEncoder
 
 /**
  * Serviciu care intreaba serverul la fiecare 10 secunde daca exista comenzi
- * de la dispecerat (deschiderea aplicatiei eTollRo) si raporteaza rezultatul.
+ * de la dispecerat (deschiderea aplicatiei eTollRo sau pornirea sesiunii live)
+ * si raporteaza rezultatul.
  */
 class CommandService : Service() {
 
@@ -31,6 +32,7 @@ class CommandService : Service() {
         private const val POLL_INTERVAL_MS = 10_000L
         private const val RETRY_INTERVAL_MS = 30_000L
         private const val ETOLL_PACKAGE = "ro.cnair.tollro"
+        private const val ETOLL_OPEN_WAIT_MS = 6_000L
 
         const val PREFS = "blue_river_control"
         const val KEY_TOKEN = "token"
@@ -132,17 +134,28 @@ class CommandService : Service() {
             val action = command.optString("action")
             if (id.isEmpty()) continue
 
-            if (action == "launch_etoll") {
-                lastStatus = "Comanda primita: deschid eTollRo."
-                val outcome = launchEtoll()
-                if (!Settings.canDrawOverlays(this)) {
-                    showAlertNotification(outcome.second)
+            when (action) {
+                "launch_etoll" -> {
+                    lastStatus = "Comanda primita: deschid eTollRo."
+                    val outcome = launchEtoll()
+                    if (!Settings.canDrawOverlays(this)) {
+                        showAlertNotification(outcome.second)
+                    }
+                    acknowledge(token, id, outcome.first, outcome.second)
+                    lastStatus = "Rezultat: " + outcome.second
                 }
-                acknowledge(token, id, outcome.first, outcome.second)
-                lastStatus = "Rezultat: " + outcome.second
-            } else {
-                acknowledge(token, id, "error", "Comanda necunoscuta: " + action)
-                lastStatus = "Comanda necunoscuta: " + action
+
+                "start_live" -> {
+                    lastStatus = "Comanda primita: pornesc sesiunea live."
+                    val outcome = startLive(command.optJSONArray("steps"))
+                    acknowledge(token, id, outcome.first, outcome.second)
+                    lastStatus = "Rezultat: " + outcome.second
+                }
+
+                else -> {
+                    acknowledge(token, id, "error", "Comanda necunoscuta: " + action)
+                    lastStatus = "Comanda necunoscuta: " + action
+                }
             }
         }
     }
@@ -159,6 +172,63 @@ class CommandService : Service() {
         } catch (e: Exception) {
             "error" to ("eTollRo nu a pornit: " + (e.message ?: ""))
         }
+    }
+
+    // Deschide eTollRo si apasa automat pasii primiti de la dispecerat
+    private fun startLive(stepsJson: JSONArray?): Pair<String, String> {
+        if (!TollAccessibilityService.isEnabled(this)) {
+            return "error" to "Activeaza automatizarea (Accesibilitate) in Blue River Control"
+        }
+
+        val steps = mutableListOf<TollAccessibilityService.Step>()
+        if (stepsJson != null) {
+            for (i in 0 until stepsJson.length()) {
+                val step = stepsJson.optJSONObject(i) ?: continue
+                val text = step.optString("text").trim()
+                if (text.isEmpty()) continue
+                steps.add(
+                    TollAccessibilityService.Step(
+                        text,
+                        step.optLong("wait_before", 1500L),
+                        step.optLong("wait_after", 2000L)
+                    )
+                )
+            }
+        }
+
+        if (steps.isEmpty()) {
+            return "error" to "Nu sunt pasi configurati pentru sesiunea live"
+        }
+
+        val launchIntent = packageManager.getLaunchIntentForPackage(ETOLL_PACKAGE)
+            ?: return "error" to "eTollRo nu este instalata"
+
+        launchIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+
+        try {
+            startActivity(launchIntent)
+        } catch (e: Exception) {
+            return "error" to ("eTollRo nu a pornit: " + (e.message ?: ""))
+        }
+
+        // Aplicatia are nevoie de cateva secunde pana se deschide
+        sleep(ETOLL_OPEN_WAIT_MS)
+
+        if (!TollAccessibilityService.runSteps(steps)) {
+            return "error" to "Automatizarea nu a pornit. Verifica accesibilitatea."
+        }
+
+        val startedAt = System.currentTimeMillis()
+        while (!TollAccessibilityService.finished &&
+            System.currentTimeMillis() - startedAt < 160_000L
+        ) {
+            sleep(1000L)
+        }
+
+        val message = TollAccessibilityService.resultMessage ?: "Timp expirat"
+        val ok = TollAccessibilityService.finished && message.startsWith("Sesiune")
+
+        return (if (ok) "done" else "error") to message
     }
 
     private fun acknowledge(token: String, id: String, status: String, message: String) {
