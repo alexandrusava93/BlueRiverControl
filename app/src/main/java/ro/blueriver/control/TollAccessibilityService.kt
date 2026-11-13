@@ -23,7 +23,7 @@ class TollAccessibilityService : AccessibilityService() {
     companion object {
         private const val TAG = "BlueRiverControl"
         private const val ETOLL_PACKAGE = "ro.cnair.tollro"
-        private const val STEP_TIMEOUT_MS = 20_000L
+        private const val STEP_TIMEOUT_MS = 25_000L
         private const val TOTAL_TIMEOUT_MS = 150_000L
 
         @Volatile
@@ -87,8 +87,14 @@ class TollAccessibilityService : AccessibilityService() {
             val step = steps[index]
 
             if (!clicked) {
+                // cat timp eTollRo nu este pe ecran, asteptam fara sa consumam timpul pasului
+                if (!etollOnScreen()) {
+                    stepStartedAt = now
+                    handler.postDelayed(this, 500)
+                    return
+                }
                 if (now - stepStartedAt > STEP_TIMEOUT_MS) {
-                    finish("Nu am gasit butonul \"" + step.text + "\" in eTollRo")
+                    finish("Nu am gasit \"" + step.text + "\". Pe ecran: " + screenSummary())
                     return
                 }
                 if (clickStep(step.text)) {
@@ -161,23 +167,81 @@ class TollAccessibilityService : AccessibilityService() {
         super.onDestroy()
     }
 
-    // Apasa primul element din eTollRo care contine textul dat (variante separate prin |)
+    private fun etollOnScreen(): Boolean =
+        rootInActiveWindow?.packageName?.toString() == ETOLL_PACKAGE
+
+    // Apasa primul element din eTollRo care contine textul dat.
+    // Comparatia ignora majusculele si diacriticele (Porneste = Pornește),
+    // iar variantele se separa prin |
     private fun clickStep(text: String): Boolean {
         val root = rootInActiveWindow ?: return false
+        val variants = text.split("|").map { normalize(it.trim()) }.filter { it.isNotEmpty() }
+        if (variants.isEmpty()) return false
 
-        for (variant in text.split("|")) {
-            val needle = variant.trim()
-            if (needle.isEmpty()) continue
+        val nodes = ArrayList<AccessibilityNodeInfo>()
+        collectNodes(root, nodes)
 
-            val nodes = root.findAccessibilityNodeInfosByText(needle)
+        for (variant in variants) {
             for (node in nodes) {
                 val pkg = node.packageName?.toString()
                 if (pkg != null && pkg != ETOLL_PACKAGE) continue
-                if (tapNode(node)) return true
+                val label = normalize(nodeLabel(node))
+                if (label.isEmpty()) continue
+                if (label.contains(variant) && tapNode(node)) return true
             }
         }
 
         return false
+    }
+
+    private fun collectNodes(node: AccessibilityNodeInfo?, out: MutableList<AccessibilityNodeInfo>) {
+        if (node == null) return
+        out.add(node)
+        for (i in 0 until node.childCount) {
+            collectNodes(node.getChild(i), out)
+        }
+    }
+
+    private fun nodeLabel(node: AccessibilityNodeInfo): String {
+        val parts = mutableListOf<String>()
+        node.text?.let { parts.add(it.toString()) }
+        node.contentDescription?.let { parts.add(it.toString()) }
+        return parts.joinToString(" ")
+    }
+
+    // Textele vizibile pe ecran, ca sa stim ce sa trecem in pasi
+    private fun screenSummary(): String {
+        val root = rootInActiveWindow ?: return "ecran necunoscut"
+        val nodes = ArrayList<AccessibilityNodeInfo>()
+        collectNodes(root, nodes)
+        val texts = nodes.mapNotNull { it.text?.toString()?.trim() }
+            .filter { it.isNotEmpty() && it.length < 40 }
+            .distinct()
+            .take(6)
+        return if (texts.isEmpty()) "niciun text citibil" else texts.joinToString(" / ")
+    }
+
+    private fun normalize(value: String): String {
+        val lower = value.lowercase()
+        val builder = StringBuilder(lower.length)
+        for (ch in lower) {
+            builder.append(
+                when (ch) {
+                    'a', 'A' -> 'a'
+                    'ă', 'â', 'á', 'à', 'ä', 'ã', 'ą' -> 'a'
+                    'î', 'í', 'ì', 'ï', 'ı' -> 'i'
+                    'ș', 'ş', 'ś', 's' -> 's'
+                    'ț', 'ţ', 't' -> 't'
+                    'é', 'è', 'ê', 'ë', 'ę' -> 'e'
+                    'ó', 'ò', 'ô', 'ö', 'õ' -> 'o'
+                    'ú', 'ù', 'û', 'ü' -> 'u'
+                    'ç', 'ć' -> 'c'
+                    'ñ' -> 'n'
+                    else -> ch
+                }
+            )
+        }
+        return builder.toString()
     }
 
     private fun tapNode(node: AccessibilityNodeInfo?): Boolean {
