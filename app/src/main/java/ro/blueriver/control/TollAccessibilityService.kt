@@ -3,6 +3,7 @@ package ro.blueriver.control
 import android.accessibilityservice.AccessibilityService
 import android.accessibilityservice.GestureDescription
 import android.content.Context
+import android.content.Intent
 import android.graphics.Path
 import android.graphics.Rect
 import android.os.Handler
@@ -25,6 +26,8 @@ class TollAccessibilityService : AccessibilityService() {
         private const val ETOLL_PACKAGE = "ro.cnair.tollro"
         private const val STEP_TIMEOUT_MS = 35_000L
         private const val TOTAL_TIMEOUT_MS = 240_000L
+        // Cat timp asteptam un ecran inainte sa repornim eTollRo de la primul ei ecran
+        private const val RESTART_AFTER_MS = 12_000L
 
         @Volatile
         private var instance: TollAccessibilityService? = null
@@ -60,6 +63,7 @@ class TollAccessibilityService : AccessibilityService() {
     private var stepStartedAt = 0L
     private var waitingUntil = 0L
     private var clicked = false
+    private var restarted = false
 
     private val tick = object : Runnable {
         override fun run() {
@@ -100,6 +104,17 @@ class TollAccessibilityService : AccessibilityService() {
                 if (clickStep(step.text)) {
                     clicked = true
                     waitingUntil = now + step.waitAfterMs.coerceAtLeast(500L)
+                } else if (!restarted && now - stepStartedAt > RESTART_AFTER_MS && relaunchEtoll()) {
+                    // Ecranul nu este cel asteptat (eTollRo era deschis pe alta pagina sau a
+                    // iesit din flux): repornim aplicatia de la primul ecran, o data pe comanda.
+                    restarted = true
+                    index = 0
+                    clicked = false
+                    stepStartedAt = now
+                    waitingUntil = 0
+                    Log.d(TAG, "Ecran neasteptat - repornesc eTollRo de la primul ecran")
+                    handler.postDelayed(this, 500)
+                    return
                 }
             } else if (now >= waitingUntil) {
                 index++
@@ -119,6 +134,7 @@ class TollAccessibilityService : AccessibilityService() {
         steps = list
         index = 0
         clicked = false
+        restarted = false
         startedAt = System.currentTimeMillis()
         stepStartedAt = startedAt
         waitingUntil = startedAt + list[0].waitBeforeMs
@@ -169,6 +185,20 @@ class TollAccessibilityService : AccessibilityService() {
 
     private fun etollOnScreen(): Boolean =
         rootInActiveWindow?.packageName?.toString() == ETOLL_PACKAGE
+
+    // Reporneste eTollRo de la primul ei ecran - folosit cand aplicatia era deschisa
+    // pe alta pagina si pasii nu se regasesc pe ecran.
+    private fun relaunchEtoll(): Boolean {
+        val intent = packageManager.getLaunchIntentForPackage(ETOLL_PACKAGE) ?: return false
+        intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK)
+        return try {
+            startActivity(intent)
+            true
+        } catch (e: Exception) {
+            Log.w(TAG, "eTollRo nu a pornit din nou: " + (e.message ?: ""))
+            false
+        }
+    }
 
     // Apasa primul element din eTollRo care contine textul dat.
     // Comparatia ignora majusculele si diacriticele (Porneste = Pornește),
