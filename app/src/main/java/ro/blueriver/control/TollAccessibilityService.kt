@@ -30,7 +30,7 @@ import android.view.accessibility.AccessibilityNodeInfo
  */
 class TollAccessibilityService : AccessibilityService() {
 
-    class Step(val text: String, val waitBeforeMs: Long, val waitAfterMs: Long)
+    class Step(val text: String, val waitBeforeMs: Long, val waitAfterMs: Long, val trailer: String? = null)
 
     companion object {
         private const val TAG = "BlueRiverControl"
@@ -39,6 +39,10 @@ class TollAccessibilityService : AccessibilityService() {
         private const val TOTAL_TIMEOUT_MS = 240_000L
         // Cat timp asteptam un ecran inainte sa repornim eTollRo de la primul ei ecran
         private const val RESTART_AFTER_MS = 12_000L
+        // Fereastra de atasare a semiremorcii: butonul de confirmare si pauzele dintre apasari
+        private const val TRAILER_CONFIRM_TEXT = "Confirma|Confirmă|Confirmați"
+        private const val TRAILER_LIST_WAIT_MS = 2_000L
+        private const val TRAILER_CONFIRM_WAIT_MS = 2_500L
 
         @Volatile
         private var instance: TollAccessibilityService? = null
@@ -152,17 +156,33 @@ class TollAccessibilityService : AccessibilityService() {
         }
     }
 
+    // Un pas cu semiremorca se transforma in trei apasari: butonul „+ Atasati o remorca",
+    // numarul semiremorcii ales de dispecer in pagina CONTURI eTollRo, apoi butonul de confirmare.
+    // Dupa confirmare, automatizarea continua cu pasii urmatori (Pasul urmator etc.).
+    private fun expandTrailerSteps(list: List<Step>): List<Step> {
+        val expanded = ArrayList<Step>(list.size + 2)
+        for (step in list) {
+            expanded.add(Step(step.text, step.waitBeforeMs, step.waitAfterMs))
+            val trailer = step.trailer?.trim().orEmpty()
+            if (trailer.isNotEmpty()) {
+                expanded.add(Step(trailer, TRAILER_LIST_WAIT_MS, TRAILER_CONFIRM_WAIT_MS))
+                expanded.add(Step(TRAILER_CONFIRM_TEXT, TRAILER_CONFIRM_WAIT_MS, TRAILER_CONFIRM_WAIT_MS))
+            }
+        }
+        return expanded
+    }
+
     private fun startRun(list: List<Step>): Boolean {
         if (running) return false
         if (list.isEmpty()) return false
 
-        steps = list
+        steps = expandTrailerSteps(list)
         index = 0
         clicked = false
         restarted = false
         startedAt = System.currentTimeMillis()
         stepStartedAt = startedAt
-        waitingUntil = startedAt + list[0].waitBeforeMs
+        waitingUntil = startedAt + steps[0].waitBeforeMs
         finished = false
         resultMessage = null
         running = true

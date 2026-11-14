@@ -197,7 +197,9 @@ class CommandService : Service() {
                     TollAccessibilityService.Step(
                         text,
                         step.optLong("wait_before", 1500L),
-                        step.optLong("wait_after", 2000L)
+                        step.optLong("wait_after", 2000L),
+                        // Semiremorca aleasa de dispecer - telefonul o selecteaza din lista
+                        step.optString("trailer").trim().takeIf { it.isNotEmpty() }
                     )
                 )
             }
