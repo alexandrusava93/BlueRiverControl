@@ -30,7 +30,7 @@ import android.view.accessibility.AccessibilityNodeInfo
  */
 class TollAccessibilityService : AccessibilityService() {
 
-    class Step(val text: String, val waitBeforeMs: Long, val waitAfterMs: Long, val trailer: String? = null)
+    class Step(val text: String, val waitBeforeMs: Long, val waitAfterMs: Long, val scroll: Boolean = false)
 
     companion object {
         private const val TAG = "BlueRiverControl"
@@ -39,10 +39,10 @@ class TollAccessibilityService : AccessibilityService() {
         private const val TOTAL_TIMEOUT_MS = 240_000L
         // Cat timp asteptam un ecran inainte sa repornim eTollRo de la primul ei ecran
         private const val RESTART_AFTER_MS = 12_000L
-        // Fereastra de atasare a semiremorcii: butonul de confirmare si pauzele dintre apasari
-        private const val TRAILER_CONFIRM_TEXT = "Confirma|Confirmă|Confirmați"
-        private const val TRAILER_LIST_WAIT_MS = 2_000L
-        private const val TRAILER_CONFIRM_WAIT_MS = 2_500L
+        // Lista de remorci poate fi lunga: se deruleaza pana apare numarul cautat
+        private const val SCROLL_INTERVAL_MS = 1_000L
+        private const val MAX_SCROLLS = 60
+        private const val SCROLL_TIMEOUT_MS = 90_000L
 
         @Volatile
         private var instance: TollAccessibilityService? = null
@@ -89,6 +89,10 @@ class TollAccessibilityService : AccessibilityService() {
     private var clicked = false
     private var restarted = false
 
+    // Derularea listei de remorci pana apare numarul cautat
+    private var scrollCount = 0
+    private var lastScrollAt = 0L
+
     private val tick = object : Runnable {
         override fun run() {
             if (!running) return
@@ -126,13 +130,25 @@ class TollAccessibilityService : AccessibilityService() {
                     handler.postDelayed(this, 500)
                     return
                 }
-                if (now - stepStartedAt > STEP_TIMEOUT_MS) {
+                val stepTimeout = if (step.scroll) SCROLL_TIMEOUT_MS else STEP_TIMEOUT_MS
+                if (now - stepStartedAt > stepTimeout) {
                     finish("Nu am gasit \"" + step.text + "\". Pe ecran: " + screenSummary())
                     return
                 }
                 if (clickStep(step.text)) {
                     clicked = true
                     waitingUntil = now + step.waitAfterMs.coerceAtLeast(500L)
+                } else if (step.scroll) {
+                    // Numarul remorcii nu se vede inca in lista: derulam lista pana apare
+                    if (scrollCount >= MAX_SCROLLS) {
+                        finish("Nu am gasit \"" + step.text + "\" in lista. Pe ecran: " + screenSummary())
+                        return
+                    }
+                    if (now - lastScrollAt >= SCROLL_INTERVAL_MS) {
+                        lastScrollAt = now
+                        scrollCount++
+                        scrollForward()
+                    }
                 } else if (!restarted && now - stepStartedAt > RESTART_AFTER_MS && relaunchEtoll()) {
                     // Ecranul nu este cel asteptat (eTollRo era deschis pe alta pagina sau a
                     // iesit din flux): repornim aplicatia de la primul ecran, o data pe comanda.
@@ -148,6 +164,8 @@ class TollAccessibilityService : AccessibilityService() {
             } else if (now >= waitingUntil) {
                 index++
                 clicked = false
+                scrollCount = 0
+                lastScrollAt = 0L
                 stepStartedAt = now
                 waitingUntil = now + (steps.getOrNull(index)?.waitBeforeMs ?: 0L)
             }
@@ -156,27 +174,11 @@ class TollAccessibilityService : AccessibilityService() {
         }
     }
 
-    // Un pas cu semiremorca se transforma in trei apasari: butonul „+ Atasati o remorca",
-    // numarul semiremorcii ales de dispecer in pagina CONTURI eTollRo, apoi butonul de confirmare.
-    // Dupa confirmare, automatizarea continua cu pasii urmatori (Pasul urmator etc.).
-    private fun expandTrailerSteps(list: List<Step>): List<Step> {
-        val expanded = ArrayList<Step>(list.size + 2)
-        for (step in list) {
-            expanded.add(Step(step.text, step.waitBeforeMs, step.waitAfterMs))
-            val trailer = step.trailer?.trim().orEmpty()
-            if (trailer.isNotEmpty()) {
-                expanded.add(Step(trailer, TRAILER_LIST_WAIT_MS, TRAILER_CONFIRM_WAIT_MS))
-                expanded.add(Step(TRAILER_CONFIRM_TEXT, TRAILER_CONFIRM_WAIT_MS, TRAILER_CONFIRM_WAIT_MS))
-            }
-        }
-        return expanded
-    }
-
     private fun startRun(list: List<Step>): Boolean {
         if (running) return false
         if (list.isEmpty()) return false
 
-        steps = expandTrailerSteps(list)
+        steps = list
         index = 0
         clicked = false
         restarted = false
@@ -245,6 +247,21 @@ class TollAccessibilityService : AccessibilityService() {
             Log.w(TAG, "eTollRo nu a pornit din nou: " + (e.message ?: ""))
             false
         }
+    }
+
+    // Deruleaza in jos lista afisata (ecranul de atasare a remorcii are multe pozitii),
+    // pana cand numarul cautat ajunge pe ecran.
+    private fun scrollForward(): Boolean {
+        val root = rootInActiveWindow ?: return false
+        val nodes = ArrayList<AccessibilityNodeInfo>()
+        collectNodes(root, nodes)
+        for (node in nodes) {
+            if (!node.isScrollable) continue
+            val pkg = node.packageName?.toString()
+            if (pkg != null && pkg != ETOLL_PACKAGE) continue
+            if (node.performAction(AccessibilityNodeInfo.ACTION_SCROLL_FORWARD)) return true
+        }
+        return false
     }
 
     // Apasa primul element din eTollRo care contine textul dat.
